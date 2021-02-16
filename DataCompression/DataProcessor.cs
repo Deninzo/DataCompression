@@ -18,41 +18,54 @@ namespace DataCompression
         private readonly Semaphore _semaphore;
         private readonly CompressedChunkStorage _storage;
         private CompressDataWriter _writer;
+        private readonly ConcurrentQueue<Chunk> _chunksForProcess;
+        private readonly WaitHandle[] _waitHandles;
         private int _chunkSize = 5 * 1024 * 1024;
-        private readonly Action<string> _actionToExecute;
+        private readonly Action<Chunk> _actionToExecute;
+
+        private bool _passThroughAllData;
 
         public DataProcessor(CompressionMode mode, int maxThreads, ILogger logger)
         {
             if (mode == CompressionMode.Compress)
-                _actionToExecute = CompressAsync;
+                _actionToExecute = CompressChunk;
             else
-                _actionToExecute = DecompressAsync;
+                _actionToExecute = DecompressChunk;
 
             _logger = logger;
             _semaphore = new Semaphore(maxThreads, maxThreads);
             _storage = new CompressedChunkStorage(mode);
+            _chunksForProcess = new ConcurrentQueue<Chunk>();
+            _waitHandles = new WaitHandle[maxThreads + 1];
         }
 
         public void ProcessData(string inputFile, string outputFile)
         {
             _writer = new CompressDataWriter(_storage, outputFile, _logger);
-            _actionToExecute(inputFile);
-        }
 
-        private void CompressAsync(string inputFile)
-        {
-            var index = 1;
+            if (!File.Exists(inputFile))
+                throw new ArgumentException("Original file does not exists");
 
-            using var originalFileStream = File.OpenRead(inputFile);
+            for (int i = 0; i < _waitHandles.Length; i++)
+            {
+                var handle = new EventWaitHandle(false, EventResetMode.ManualReset);
+                _waitHandles[i] = handle;
+                
+                if(i == 0) continue;
+                
+                var thread = new Thread(ProcessAsync);
+                thread.Start(handle);
+            }
+            
+            using var originalFileStream = File.Open(inputFile, FileMode.Open);
             
             var buffer = new byte[_chunkSize];
-            Thread lastThread = null;
-            var countReadBytes = 0;
-            
+            var countReadBytes = 0;           
+            var index = 1;
+
             while ((countReadBytes = originalFileStream.Read(buffer, 0, buffer.Length)) != 0)
             {
-                lastThread = new Thread(CompressChunk);
-                lastThread.Start(new Chunk
+                _chunksForProcess.Enqueue(new Chunk
                 {
                     Index = index,
                     Data = buffer.Take(countReadBytes).ToArray()
@@ -60,45 +73,83 @@ namespace DataCompression
                 index++;
             }
 
-            lastThread?.Join();
+            _passThroughAllData = true;
         }
-        
-        private void DecompressAsync(string inputFile)
+
+        // private void CompressAsync(string inputFile)
+        // {
+        //     var index = 1;
+        //
+        //     using var originalFileStream = File.OpenRead(inputFile);
+        //     
+        //     var buffer = new byte[_chunkSize];
+        //     Thread lastThread = null;
+        //     var countReadBytes = 0;
+        //     
+        //     while ((countReadBytes = originalFileStream.Read(buffer, 0, buffer.Length)) != 0)
+        //     {
+        //         lastThread = new Thread(CompressChunk);
+        //         lastThread.Start(new Chunk
+        //         {
+        //             Index = index,
+        //             Data = buffer.Take(countReadBytes).ToArray()
+        //         });
+        //         index++;
+        //     }
+        //
+        //     lastThread?.Join();
+        // }
+
+        private void ProcessAsync(object param)
         {
-            var index = 1;
-
-            using var originalFileStream = File.OpenRead(inputFile);
+            var waitHandle = (EventWaitHandle)param;
             
-            var lengthBuffer = new byte[4];
-            Thread lastThread = null;
-
-            while (originalFileStream.Read(lengthBuffer, 0, lengthBuffer.Length) != 0)
+            while (!_passThroughAllData || _chunksForProcess.Count > 0)
             {
-                var length = BitConverter.ToInt32(lengthBuffer);
-
-                var buffer = new byte[length];
-
-                var countReadBytes = originalFileStream.Read(buffer, 0, buffer.Length);
-
-                lastThread = new Thread(DecompressChunk);
-
-                lastThread.Start(new Chunk
+                Chunk chunk;
+                while (!_chunksForProcess.TryDequeue(out chunk))
                 {
-                    Data = buffer.Take(countReadBytes).ToArray(),
-                    Index = index
-                });
-
-                index++;
+                    
+                }
+                _actionToExecute(chunk);
             }
 
-            lastThread?.Join();
+            waitHandle.Set();
         }
         
-        public void CompressChunk(object buffer)
+        // private void DecompressAsync(string inputFile)
+        // {
+        //     var index = 1;
+        //
+        //     using var originalFileStream = File.OpenRead(inputFile);
+        //     
+        //     var lengthBuffer = new byte[4];
+        //     Thread lastThread = null;
+        //
+        //     while (originalFileStream.Read(lengthBuffer, 0, lengthBuffer.Length) != 0)
+        //     {
+        //         var length = BitConverter.ToInt32(lengthBuffer);
+        //
+        //         var buffer = new byte[length];
+        //
+        //         var countReadBytes = originalFileStream.Read(buffer, 0, buffer.Length);
+        //
+        //         lastThread = new Thread(DecompressChunk);
+        //
+        //         lastThread.Start(new Chunk
+        //         {
+        //             Data = buffer.Take(countReadBytes).ToArray(),
+        //             Index = index
+        //         });
+        //
+        //         index++;
+        //     }
+        //
+        //     lastThread?.Join();
+        // }
+        
+        public void CompressChunk(Chunk chunk)
         {
-            _semaphore.WaitOne();
-
-            var chunk = buffer as Chunk;
             using var memoryStream = new MemoryStream();
             using var compressedStream = new GZipStream(memoryStream, CompressionMode.Compress);
             compressedStream.Write(chunk.Data);
@@ -107,15 +158,10 @@ namespace DataCompression
             var result = memoryStream.ToArray();
 
             _storage.AddChunk(new Chunk {Index = chunk.Index, Data = result});
-
-            _semaphore.Release();
         }
 
-        private void DecompressChunk(object buffer)
+        private void DecompressChunk(Chunk chunk)
         {
-            _semaphore.WaitOne();
-
-            var chunk = buffer as Chunk;
             using var memoryStream = new MemoryStream(chunk.Data);
             using var compressedStream = new GZipStream(memoryStream, CompressionMode.Decompress);
 
@@ -123,10 +169,7 @@ namespace DataCompression
             var countReadBytes = compressedStream.Read(decompressedChunk);
             compressedStream.Flush();
             memoryStream.Flush();
-
             _storage.AddChunk(new Chunk {Index = chunk.Index, Data = decompressedChunk.Take(countReadBytes).ToArray()});
-
-            _semaphore.Release();
         }
     }
 }

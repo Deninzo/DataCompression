@@ -17,8 +17,11 @@ namespace DataCompression
             _logger = LoggerFactory.Create(buidlder => buidlder.AddNLog())
                 .CreateLogger<Program>();
 
-            if (!CheckInputData(args))
+            if (args.Length != 3)
+            {
+                _logger.LogCritical("Got wrong input params");
                 return 1;
+            }
 
             var action = args[0];
             var inputFileName = args[1];
@@ -36,25 +39,6 @@ namespace DataCompression
             }
 
             return 0;
-        }
-
-        private static bool CheckInputData(string[] args)
-        {
-            if (args.Length != 3)
-            {
-                _logger.LogCritical("Got wrong input params");
-                return false;
-            }
-
-            var inputFileName = args[1];
-
-            if (!File.Exists(inputFileName))
-            {
-                _logger.LogCritical("Original file does not exists");
-                return false;
-            }
-
-            return true;
         }
     }
 }
