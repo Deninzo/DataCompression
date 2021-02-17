@@ -6,32 +6,28 @@ using Microsoft.Extensions.Logging;
 
 namespace DataCompression
 {
-    public class CompressDataWriter
+    public class CompressDataWriter : IDisposable
     {
         private readonly ILogger _logger;
-        private readonly CompressedChunkStorage _storage;
-        private readonly string _outputFileName;
+        private readonly FileStream _fileStream;
+        private readonly CompressionMode _mode;
         
         private static readonly object Sync = new object();
         
-        public CompressDataWriter(CompressedChunkStorage storage, string outputFileName, ILogger logger)
+        public CompressDataWriter(CompressionMode mode, string outputFileName, ILogger logger)
         {
+            _mode = mode;
             _logger = logger;
-            _storage = storage;
-            _storage.ChunkAdded += WriteChunkToFile;
-            _outputFileName = outputFileName;
+            _fileStream = new FileStream(outputFileName, FileMode.Append);
         }
 
-        public void WriteChunkToFile(CompressionMode mode)
+        public void WriteChunkToFile(byte[] chunk)
         {
             lock(Sync)
             {
                 try
                 {
-                    using var writer = new FileStream(_outputFileName, FileMode.Append);
-                    var chunk = _storage.GetChunk();
-
-                    if (mode == CompressionMode.Compress)
+                    if (_mode == CompressionMode.Compress)
                     {
                         var chunkLength = BitConverter.GetBytes(chunk.Length);
 
@@ -39,21 +35,25 @@ namespace DataCompression
 
                         chunkLength.CopyTo(dataWithLength, 0);
                         chunk.CopyTo(dataWithLength, chunkLength.Length);
-                        writer.Write(dataWithLength);
+                        _fileStream.Write(dataWithLength);
                     }
                     else
                     {
-                        writer.Write(chunk);
+                        _fileStream.Write(chunk);
                     }
 
-                    writer.Flush();
-                    writer.Close();
+                    _fileStream.Flush();
                 }
                 catch(Exception e)
                 {
                     _logger.LogError($"Error while write to output file: {e.Message}");
                 }
             }
+        }
+
+        public void Dispose()
+        {
+            _fileStream?.Dispose();
         }
     }
 }

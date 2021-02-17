@@ -14,7 +14,7 @@ namespace DataCompression
         
         static int Main(string[] args)
         {
-            _logger = LoggerFactory.Create(buidlder => buidlder.AddNLog())
+            _logger = LoggerFactory.Create(builder => builder.AddNLog())
                 .CreateLogger<Program>();
 
             if (args.Length != 3)
@@ -29,8 +29,8 @@ namespace DataCompression
             
             try
             {
-                var compressor = DataProcessorFactory.CreateDataProcessor(action, _logger);
-                compressor.ProcessData(inputFileName, outputFileName);
+                using var compressor = DataProcessorFactory.CreateDataProcessor(action, _logger, inputFileName, outputFileName);
+                compressor.ProcessData();
             }
             catch (Exception e)
             {

@@ -1,5 +1,4 @@
 using System.IO;
-using System.IO.Compression;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
@@ -8,9 +7,9 @@ namespace DataCompression.Tests
 {
     public class DataProcessorTests
     {
-        private string _originalFile = "test.docx";
+        private string _originalFile = @"bigfile";
         private string _compressedFile = "compressed";
-        private string _uncompressedFile = "uncompressed.docx";
+        private string _uncompressedFile = "uncompressed";
         
         [Test]
         public void Compress_Working_Fine()
@@ -20,8 +19,8 @@ namespace DataCompression.Tests
                 File.Delete(_compressedFile);
             }
             
-            var processor = DataProcessorFactory.CreateDataProcessor("compress", new Mock<ILogger>().Object);
-            processor.ProcessData(_originalFile, _compressedFile);
+            using var processor = DataProcessorFactory.CreateDataProcessor("compress", new Mock<ILogger>().Object, _originalFile, _compressedFile);
+            processor.ProcessData();
             Assert.Pass();
         }
         
@@ -33,8 +32,8 @@ namespace DataCompression.Tests
                 File.Delete(_uncompressedFile);
             }
 
-            var processor = DataProcessorFactory.CreateDataProcessor("decompress", new Mock<ILogger>().Object);
-            processor.ProcessData(_compressedFile, _uncompressedFile);
+            using var processor = DataProcessorFactory.CreateDataProcessor("decompress", new Mock<ILogger>().Object, _compressedFile, _uncompressedFile);
+            processor.ProcessData();
             Assert.Pass();
         }
         

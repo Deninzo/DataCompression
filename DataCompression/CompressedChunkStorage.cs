@@ -2,25 +2,22 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO.Compression;
+using Microsoft.Extensions.Logging;
 
 namespace DataCompression
 {
-    public class CompressedChunkStorage
+    public class CompressedChunkStorage : IDisposable
     {
         public ConcurrentDictionary<long, byte[]> WaitingChunks = new ConcurrentDictionary<long, byte[]>();
         
         private static readonly object SynchronizationObject = new object();
 
-        private readonly ConcurrentQueue<byte[]> _compressedChunks = new ConcurrentQueue<byte[]>();
-        private readonly CompressionMode _mode;
+        private readonly CompressDataWriter _dataWriter;
         private long _lastAddedIndex;
-        
-        public delegate void ChunkAddedHandler(CompressionMode mode);
-        public event ChunkAddedHandler ChunkAdded;
 
-        public CompressedChunkStorage(CompressionMode mode)
+        public CompressedChunkStorage(CompressionMode mode, string outputFile, ILogger logger)
         {
-            _mode = mode;
+            _dataWriter = new CompressDataWriter(mode, outputFile, logger);
         }
 
         public CompressedChunkStorage(long lastAddedIndex, ConcurrentDictionary<long, byte[]> waitingChunks)
@@ -35,12 +32,12 @@ namespace DataCompression
             {
                 if (_lastAddedIndex == chunk.Index - 1)
                 {
-                    _compressedChunks.Enqueue(chunk.Data);
+                    _dataWriter.WriteChunkToFile(chunk.Data);
+                    
                     lock (SynchronizationObject)
                     {
                         _lastAddedIndex++;
                     }
-                    ChunkAdded?.Invoke(_mode);
 
                     if (WaitingChunks.TryGetValue(chunk.Index + 1, out var data))
                     {
@@ -52,7 +49,6 @@ namespace DataCompression
                 {
                     while (!WaitingChunks.TryAdd(chunk.Index, chunk.Data))
                     {
-                        
                     }
                 }
             }
@@ -63,16 +59,9 @@ namespace DataCompression
             }
         }
 
-        public byte[] GetChunk()
+        public void Dispose()
         {
-            byte[] chunk;
-            
-            while (!_compressedChunks.TryDequeue(out chunk))
-            {
-                
-            }
-
-            return chunk;
+            _dataWriter?.Dispose();
         }
     }
 }

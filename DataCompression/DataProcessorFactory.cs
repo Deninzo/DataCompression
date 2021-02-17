@@ -6,11 +6,11 @@ namespace DataCompression
 {
     public static class DataProcessorFactory
     {
-        public static DataProcessor CreateDataProcessor(string action, ILogger logger)
+        public static DataProcessor CreateDataProcessor(string action, ILogger logger, string inputFile, string outputFile)
         {
-            var countOfProcessor = Environment.ProcessorCount + 4;
-            if (action == "compress") return new DataProcessor(CompressionMode.Compress, countOfProcessor, logger);
-            if (action == "decompress") return new DataProcessor(CompressionMode.Decompress, countOfProcessor, logger);
+            var countOfThreads = Environment.ProcessorCount;
+            if (action == "compress") return new DataProcessor(CompressionMode.Compress, countOfThreads, logger, inputFile, outputFile);
+            if (action == "decompress") return new DataProcessor(CompressionMode.Decompress, countOfThreads, logger, inputFile, outputFile);
 
             throw new ArgumentException("Got wrong action");
         }
